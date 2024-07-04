@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coin Finder</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        #results {
+            margin-top: 20px;
+        }
+        .result-item {
+            display: flex;
+            align-items: center;
+            border: 1px solid #ddd;
+            margin-left: 5%;
+            margin-right: 5%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            flex-direction: column;
+        }
+        .result-main {
+            display: flex;
+            width: 100%;
+        }
+        .result-item img {
+            width: 15%;
+            height: 15%;
+            margin-right: 10px;
+        }
+        .result-content {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+        }
+        .date-auction,
+        .year-auction,
+        .hammer-description {
+            margin-left: 1%;
+            margin-top: 5px;
+            display: flex;
+            align-items: center;
+            gap: 6%; /* Adjust gap as needed */
+            font-size: 95%;
+        }
+        .hammer-description {
+            gap: 7.4%; /* Adds space above the description */
+        }
+        .date-auction .date,
+        .hammer-description .hammer {
+            white-space: nowrap;
+        }
+        .date-auction p,
+        .year-auction,
+        .hammer-description p {
+            margin: 0;
+        }
+        .date-value,
+        .year-auction,
+        .price-value {
+            display: block;
+        }
+        .year-auction {
+            margin-left: 1%;
+            margin-top: -5px;
+            display: flex;
+            gap: 6.5%;
+            align-items: center;
+            font-size: 95%;
+        }
+        .result-details {
+            display: none;
+            margin-top: 10px;
+            width: 100%;
+            font-size: 90%;
+        }
+        #loading {
+            display: none;
+            font-size: 1.2em;
+            color: #000000;
+        }
+        #load-more {
+            display: none;
+            margin-top: 20px;
+            font-size: 1.2em;
+            color: #000000;
+            cursor: pointer;
+        }
+        .lightbox {
+            display: none;
+            position: fixed;
+            z-index: 999;
+            padding: 20px;
+            background-color: rgba(0, 0, 0, 0.9);
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            overflow: auto;
+            text-align: center;
+        }
+        .lightbox img {
+            max-width: 90%;
+            max-height: 90%;
+            margin: auto;
+            display: block;
+        }
+        .close-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: #ffffff;
+            font-size: 20px;
+            cursor: pointer;
+        }
+        .auction-link {
+            color: black;
+        }
+        .auction-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <h1>Coin Finder</h1>
+    <input type="text" id="search-input" placeholder="Search description...">
+    <input type="text" id="grade-input" placeholder="Search grade (optional)...">
+    <input type="text" id="year-input" placeholder="Search year (optional)...">
+    <label for="lots-number">Lots to show:</label>
+    <select id="lots-number">
+        <option value="10">10</option>
+        <option value="25" selected>25</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+    </select>
+    <label for="exact-search">Exact Search</label>
+    <input type="checkbox" id="exact-search" checked>
+    <button onclick="search()">Search</button>
+    <div id="loading">Searching...</div>
+    <div id="results"></div>
+    <button id="load-more" onclick="loadMore()">Load More</button>
+
+    <!-- Lightbox container -->
+    <div id="lightbox" class="lightbox" onclick="closeLightbox()">
+        <span class="close-btn" onclick="closeLightbox()">&times;</span>
+        <img id="lightbox-image" src="" alt="Popup Image">
+    </div>
+
+    <script>
+        let jsonData = [];
+        let filteredResults = [];
+        let currentPage = 1;
+        let lotsPerPage = 25;
+        let searchTimeout;
+
+        const jsonUrls = [
+            'data(1).json',
+            'data(2).json',
+            'data(3).json',
+            'data(4).json',
+            'data(5).json',
+            'data(6).json',
+            'data(7).json',
+            /*'combined_data.json'*/
+            // Add more URLs as needed
+        ];
+
+        // Load multiple JSON files
+        Promise.all(jsonUrls.map(url => fetch(url).then(response => response.json())))
+            .then(results => {
+                jsonData = results.flat(); // Combine all the JSON data into a single array
+            })
+            .catch(error => {
+                console.error('There has been a problem with your fetch operation:', error);
+            });
+
+        function search() {
+            const query = document.getElementById('search-input').value.toLowerCase();
+            const gradeQuery = document.getElementById('grade-input').value.toLowerCase();
+            const yearQuery = document.getElementById('year-input').value;
+            const exactSearch = document.getElementById('exact-search').checked;
+            const resultsContainer = document.getElementById('results');
+            const loadingIndicator = document.getElementById('loading');
+            lotsPerPage = parseInt(document.getElementById('lots-number').value, 10);
+            currentPage = 1;
+
+            // Show loading indicator
+            loadingIndicator.style.display = 'block';
+            resultsContainer.innerHTML = '';
+            document.getElementById('load-more').style.display = 'none';
+
+            if (!query && !gradeQuery && !yearQuery) {
+                loadingIndicator.style.display = 'none';
+                resultsContainer.innerHTML = '<p>Please enter a search query.</p>';
+                return;
+            }
+
+            if (!jsonData.length) {
+                loadingIndicator.style.display = 'none';
+                resultsContainer.innerHTML = '<p>Data is not loaded yet. Please try again later.</p>';
+                return;
+            }
+
+            let queryRegex;
+            if (exactSearch) {
+                queryRegex = new RegExp(query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'i');
+            } else {
+                queryRegex = new RegExp(query.split('').map(c => c.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')).join('.*'), 'i');
+            }
+
+            const gradeRegex = gradeQuery ? new RegExp(gradeQuery.split('').map(c => c.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')).join('.*'), 'i') : null;
+
+            filteredResults = jsonData.filter(item => {
+                const descriptionMatch = item.Description && queryRegex.test(item.Description);
+                const gradeMatch = !gradeQuery || (item['Coin Grade'] && gradeRegex.test(item['Coin Grade']));
+                const yearMatch = !yearQuery || item.Year === yearQuery;
+                return descriptionMatch && gradeMatch && yearMatch;
+            });
+
+            filteredResults.sort((a, b) => {
+                const dateA = new Date(a['Auction Date']);
+                const dateB = new Date(b['Auction Date']);
+                return dateA - dateB;
+            });
+
+            // Hide loading indicator
+            loadingIndicator.style.display = 'none';
+
+            if (filteredResults.length === 0) {
+                resultsContainer.innerHTML = '<p>No results found.</p>';
+                return;
+            }
+
+            displayResults();
+        }
+
+        function displayResults() {
+            const resultsContainer = document.getElementById('results');
+            const loadMoreButton = document.getElementById('load-more');
+            const startIndex = (currentPage - 1) * lotsPerPage;
+            const endIndex = currentPage * lotsPerPage;
+            const resultsToShow = filteredResults.slice(startIndex, endIndex);
+
+            resultsToShow.forEach(result => {
+                const lotNumber = getLotNumberFromLink(result['Coin Link']);
+                const resultItem = document.createElement('div');
+                resultItem.className = 'result-item';
+                resultItem.onclick = () => toggleDetails(resultItem);
+
+                const truncatedDescription = result.Description.length > 250 ? result.Description.substring(0, 250) + '...' : result.Description;
+
+                const resultContent = `
+                    <div class="result-main">
+                        <img src="${result['Coin Image']}" alt="Coin Image" onclick="event.stopPropagation(); openLightbox('${result['Coin Image']}')">
+                        <div class="result-content">
+                            <div class="date-auction">
+                                <p class="date"><strong>Date:</strong> <span class="date-value">${result['Auction Date']}</span></p>
+                                <p><strong><a class="auction-link" href="${result['Coin Link']}" target="_blank" onclick="event.stopPropagation();">${result['Auction Name']}</a></strong></p>
+                                <p><span><strong>Lot:</strong> ${lotNumber}</span></p>
+                            </div>
+                            <div class="hammer-description">
+                                <p class="hammer"><strong>Hammer:</strong> <span class="price-value">${result['Hammer Price']}</span></p>
+                                <p class="description" data-full-description="${result.Description}">${truncatedDescription}</p>
+                            </div>
+                            <div class="year-auction">
+                                <p><strong>Year:</strong> ${result['Year']}</p>
+                                <p><strong>Coin Grade:</strong> <span class="coin-grade">${result['Coin Grade']}</span></p>
+                                <p><strong>Starting price</strong> <span>${result['Starting Price']}</span></p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="result-details">
+                        ${result.Description.length > 250 ? `<p><strong>Description:</strong> ${result.Description}</p>` : ''}
+                        ${Object.keys(result).map(key => key !== 'Starting Price' && key !== 'Lot' && key !== 'Coin Grade' && key !== 'Year' && key !== 'Description' && key !== 'Auction Date' && key !== 'Auction Name' && key !== 'Hammer Price' && key !== 'Coin Image' && key !== 'Coin Link' ? `<p><strong>${key}:</strong> ${result[key]}</p>` : '').join('')}
+                    </div>
+                `;
+
+                resultItem.innerHTML = resultContent;
+                resultsContainer.appendChild(resultItem);
+            });
+
+            if (endIndex < filteredResults.length) {
+                loadMoreButton.style.display = 'block';
+            } else {
+                loadMoreButton.style.display = 'none';
+            }
+        }
+
+        function getLotNumberFromLink(link) {
+            const url = new URL(link);
+            const params = new URLSearchParams(url.search);
+            return params.get('lot') || '';
+        }
+
+        function loadMore() {
+            currentPage++;
+            displayResults();
+        }
+
+        function toggleDetails(resultItem) {
+            const details = resultItem.querySelector('.result-details');
+            const description = resultItem.querySelector('.description');
+            const fullDescription = description.getAttribute('data-full-description');
+
+            if (details.style.display === 'none' || details.style.display === '') {
+                details.style.display = 'block';
+                description.textContent = fullDescription;
+            } else {
+                details.style.display = 'none';
+                description.textContent = fullDescription.length > 250 ? fullDescription.substring(0, 250) + '...' : fullDescription;
+            }
+        }
+
+        function openLightbox(imageSrc) {
+            const lightbox = document.getElementById('lightbox');
+            const lightboxImage = document.getElementById('lightbox-image');
+            lightboxImage.src = imageSrc;
+            lightbox.style.display = 'block';
+        }
+
+        function closeLightbox() {
+            const lightbox = document.getElementById('lightbox');
+            lightbox.style.display = 'none';
+        }
+    </script>
+</body>
+</html>
